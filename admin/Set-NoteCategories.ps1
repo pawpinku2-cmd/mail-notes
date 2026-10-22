@@ -23,6 +23,9 @@
        target mailboxes with Exchange "RBAC for Applications"
        (role "Application MailboxSettings.ReadWrite"). See ADMIN.md, section 3.
 
+.NOTES
+    Created by Vaibhav Girdhar. Part of My Mail Notes.
+
 .REQUIREMENTS
     PowerShell 7+ (recommended) or Windows PowerShell 5.1.
     Module Microsoft.Graph.Authentication (installed for the current user if missing; no local admin needed).
