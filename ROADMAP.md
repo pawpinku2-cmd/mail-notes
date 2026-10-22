@@ -3,12 +3,11 @@
 Positioning: private, Microsoft 365-native notes on emails. Nothing leaves the mailbox, and an admin can deploy it centrally.
 
 Rule: each phase is tested in real Outlook and signed off before the next phase starts.
-Exception logged 22 Oct 2026: Phase 2 was started at the owner's request before Phase 1 was signed off. Phase 1 and Phase 2 are now tested together (README "Phase 1 tests" and "Phase 2 tests").
 
 | Phase | Status |
 |---|---|
 | 0 – Private notes MVP | ✅ Done (22 Oct 2026) |
-| 1 – Quick wins | 🧪 Built and deployed (v1.1). Real-Outlook test still pending |
+| 1 – Quick wins | ✅ Tested by owner in Outlook on the web (22 Oct 2026). Narrow-pane layout bug found from the test screenshot and fixed |
 | 2 – Differentiators | 🧪 Built and deployed (v1.2, 22 Oct 2026). Real-Outlook test pending |
 | 3 – Optional / on demand | ⏸ Not started |
 
@@ -24,7 +23,7 @@ Exception logged 22 Oct 2026: Phase 2 was started at the owner's request before 
 - [x] No server, no sign-in, no network calls. CSP locked down. Least-privilege `ReadWriteItem`
 - [x] Hosted on GitHub Pages: https://pawpinku2-cmd.github.io/mail-notes/
 
-## Phase 1 – Quick wins 🧪
+## Phase 1 – Quick wins ✅
 
 | # | Feature | Notes |
 |---|---|---|
@@ -33,7 +32,9 @@ Exception logged 22 Oct 2026: Phase 2 was started at the owner's request before 
 | 1.3 | **Follow-up reminder** | Opens a new calendar event pre-filled with the note, subject and sender (tomorrow 9:00–9:15). The user adjusts the time and saves. Not available on mobile (Microsoft limitation). |
 | 1.4 | **Notes on meetings (attendee view)** | Same pane on calendar meetings you've been invited to. Sent Items already work. |
 
-Phase 1 test checklist: see README "Phase 1 tests".
+Phase 1 test checklist: see README "Phase 1 tests". Tested by the owner on 22 Oct 2026 before Phase 2 started.
+
+Fixed after test: at Outlook's default pane width (~300 px), the button row overflowed ("+ Date/time" clipped on the left, "/ 2000" and "Edit" on the right). Rows now wrap. Checked at 280, 300, 320 and 360 px.
 
 Known limits:
 - The colour categories must exist in each mailbox. Creating them automatically needs `ReadWriteMailbox`, which is deliberately not used. Phase 3 adds an admin script.
