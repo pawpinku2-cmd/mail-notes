@@ -35,7 +35,13 @@
         <span id="status" class="hint" aria-live="polite"></span>
         <span id="char-count" class="hint">0 / 2000</span>
       </div>
+      <dl id="meta" class="meta" hidden>
+        <div><dt>Added</dt><dd id="meta-added"></dd></div>
+        <div id="meta-edited-row" hidden><dt>Last edited</dt><dd id="meta-edited"></dd></div>
+      </dl>
       <div class="row actions">
+        <button type="button" id="stamp-btn" class="btn small" title="Insert today's date and time at the cursor (Ctrl+Shift+D)">+ Date/time</button>
+        <span class="spacer"></span>
         <button type="button" id="delete-btn" class="btn danger" hidden>Delete note</button>
         <button type="button" id="save-btn" class="btn primary">Save</button>
       </div>

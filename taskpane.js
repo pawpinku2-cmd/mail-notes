@@ -221,16 +221,52 @@
     ta.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveNow(false); }
     });
+    ta.addEventListener("keydown", function (e) {
+      if (e.key.toLowerCase() === "d" && e.shiftKey && (e.ctrlKey || e.metaKey)) { e.preventDefault(); insertStamp(); }
+    });
+    $("stamp-btn").addEventListener("click", insertStamp);
     $("save-btn").addEventListener("click", function () { saveNow(false); });
     $("delete-btn").addEventListener("click", function () { $("confirm-delete").hidden = false; });
     $("confirm-no").addEventListener("click", hideConfirm);
     $("confirm-yes").addEventListener("click", function () { hideConfirm(); deleteNote(false); });
   }
 
+  /* Insert "[22/10/2026 2:15 pm] " at the cursor, on its own line, then autosave. */
+  function insertStamp() {
+    const ta = $("note");
+    const now = new Date();
+    const stamp = "[" + now.toLocaleDateString("en-AU") + " " +
+      now.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }) + "] ";
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    const before = ta.value.slice(0, start);
+    const prefix = before && !before.endsWith("\n") ? "\n" : "";
+    const insert = prefix + stamp;
+    if (ta.value.length - (end - start) + insert.length > MAX_TEXT) {
+      setStatus("error", "Note is full. Remove some text before adding a date/time.");
+      return;
+    }
+    ta.setRangeText(insert, start, end, "end");
+    ta.focus();
+    updateUi();
+    scheduleSave();
+  }
+
+  function renderMeta() {
+    const m = state.savedMeta;
+    const show = !!(state.saved && m && m.created);
+    $("meta").hidden = !show;
+    if (!show) return;
+    $("meta-added").textContent = fmtFull(m.created);
+    const edited = m.modified && m.modified !== m.created;
+    $("meta-edited-row").hidden = !edited;
+    $("meta-edited").textContent = edited ? fmtFull(m.modified) : "";
+  }
+
   function updateUi() {
     const current = $("note").value;
     $("char-count").textContent = current.length + " / " + MAX_TEXT;
     $("delete-btn").hidden = !state.saved;
+    renderMeta();
     if (state.saving) return;
     if (clean(current) !== state.saved) {
       setStatus("unsaved", "Unsaved changes");
@@ -282,6 +318,15 @@
 
   function errText(r) {
     return (r && r.error && r.error.message) ? r.error.message : "Unknown error.";
+  }
+
+  /* "Wed 22 Oct 2026, 2:15 pm" in the user's local time zone. */
+  function fmtFull(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return "";
+    return d.toLocaleString("en-AU", {
+      weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit",
+    });
   }
 
   function fmt(iso) {

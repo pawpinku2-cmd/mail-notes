@@ -104,3 +104,8 @@ textarea:focus-visible, button:focus-visible, summary:focus-visible { outline: 2
 #status.saved { color: var(--ok-fg); }
 #status.unsaved { color: var(--warn-fg); }
 #status.error { color: var(--danger); }
+.row.actions .spacer { flex: 1; }
+.meta { margin: 8px 0 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); font-size: 12px; display: grid; gap: 2px; }
+.meta div { display: flex; gap: 6px; }
+.meta dt { color: var(--muted); min-width: 72px; }
+.meta dd { margin: 0; }
