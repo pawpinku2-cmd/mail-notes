@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <!--
+    Content Security Policy: this page may only run its own script plus Office.js from Microsoft.
+    It makes no network calls of its own. Notes never leave your mailbox.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://appsforoffice.microsoft.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://appsforoffice.microsoft.com; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>My Mail Notes</title>
+  <link rel="stylesheet" href="taskpane.css">
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script src="taskpane.js" defer></script>
+</head>
+<body>
+  <main id="app" aria-busy="true">
+    <header class="top">
+      <h1>My Mail Notes</h1>
+      <p class="sub" id="context-line">Private note for this email</p>
+    </header>
+
+    <div id="banner" class="banner" role="status" aria-live="polite" hidden></div>
+
+    <section id="loading" class="loading">
+      <span class="spinner" aria-hidden="true"></span>
+      <span>Loading…</span>
+    </section>
+
+    <section id="content" hidden>
+      <label for="note" class="visually-hidden">Note</label>
+      <textarea id="note" rows="8" maxlength="2000" placeholder="Type a private note for this email…" spellcheck="true"></textarea>
+      <div class="row">
+        <span id="status" class="hint" aria-live="polite"></span>
+        <span id="char-count" class="hint">0 / 2000</span>
+      </div>
+      <div class="row actions">
+        <button type="button" id="delete-btn" class="btn danger" hidden>Delete note</button>
+        <button type="button" id="save-btn" class="btn primary">Save</button>
+      </div>
+      <div id="confirm-delete" class="warn" role="alert" hidden>
+        Delete the note on this email?
+        <div class="warn-actions">
+          <button type="button" id="confirm-yes" class="btn danger small">Delete</button>
+          <button type="button" id="confirm-no" class="btn small">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="foot">
+      Private to your mailbox. The note is saved on this email and is never sent to anyone,
+      including the sender. Saves automatically as you type.
+    </footer>
+  </main>
+</body>
+</html>
