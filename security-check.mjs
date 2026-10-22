@@ -5,7 +5,7 @@
 // Exit code 0 = all checks passed. Runs automatically on every push (GitHub Actions).
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, extname, dirname } from "node:path";
+import { join, extname, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = process.argv[2] || dirname(fileURLToPath(import.meta.url));
@@ -90,12 +90,13 @@ manifests.forEach((m) => {
 const files = [];
 (function walk(d) { for (const f of readdirSync(d)) { if (f.startsWith(".")) continue; const p = join(d, f); statSync(p).isDirectory() ? walk(p) : files.push(p); } })(root);
 const okTypes = new Set([".html", ".js", ".mjs", ".css", ".png", ".xml", ".md", ".json", ".txt"]);
-const isAdminScript = (f) => /[\\/]admin[\\/][^\\/]+\.ps1$/.test(f);
+const rel = (f) => relative(root, f).split("\\").join("/");
+const isAdminScript = (f) => /^admin\/[^/]+\.ps1$/.test(rel(f));
 const odd = files.filter((f) => !okTypes.has(extname(f).toLowerCase()) && !isAdminScript(f));
-check(odd.length === 0, "No executables or unexpected file types", odd.join(", "));
+check(odd.length === 0, "No executables or unexpected file types", odd.map(rel).join(", "));
 const adminScripts = files.filter(isAdminScript);
-check(adminScripts.every((f) => !read(f.slice(root.length + 1)).match(/Invoke-WebRequest|Invoke-RestMethod|DownloadString|DownloadFile|Start-BitsTransfer|iex\b|Invoke-Expression/i)),
-  "Admin scripts (run by IT, never by the add-in) don't download or execute remote code", adminScripts.map((f) => f.slice(root.length + 1)).join(", "));
+check(adminScripts.length > 0 && adminScripts.every((f) => !read(rel(f)).match(/Invoke-WebRequest|Invoke-RestMethod|DownloadString|DownloadFile|Start-BitsTransfer|iex\b|Invoke-Expression/i)),
+  "Admin scripts (run by IT, never by the add-in) don't download or execute remote code", adminScripts.map(rel).join(", "));
 
 /* report */
 const pad = (s) => (s + " ".repeat(70)).slice(0, 70);
