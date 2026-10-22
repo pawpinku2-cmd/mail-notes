@@ -3,12 +3,13 @@
 Positioning: private, Microsoft 365-native notes on emails. Nothing leaves the mailbox, and an admin can deploy it centrally.
 
 Rule: each phase is tested in real Outlook and signed off before the next phase starts.
+Exception logged 22 Oct 2026: Phase 2 was started at the owner's request before Phase 1 was signed off. Phase 1 and Phase 2 are now tested together (README "Phase 1 tests" and "Phase 2 tests").
 
 | Phase | Status |
 |---|---|
 | 0 – Private notes MVP | ✅ Done (22 Oct 2026) |
-| 1 – Quick wins | 🧪 Built, waiting for real-Outlook test and sign-off |
-| 2 – Differentiators | ⏸ Not started (needs Phase 1 sign-off) |
+| 1 – Quick wins | 🧪 Built and deployed (v1.1). Real-Outlook test still pending |
+| 2 – Differentiators | 🧪 Built and deployed (v1.2, 22 Oct 2026). Real-Outlook test pending |
 | 3 – Optional / on demand | ⏸ Not started |
 
 ---
@@ -36,17 +37,19 @@ Phase 1 test checklist: see README "Phase 1 tests".
 
 Known limits:
 - The colour categories must exist in each mailbox. Creating them automatically needs `ReadWriteMailbox`, which is deliberately not used. Phase 3 adds an admin script.
-- A meeting you organised opens in edit mode, so the pane isn't offered there yet (Phase 2: compose support).
+- A meeting you organised opens in edit mode, so the pane isn't offered there yet (fixed in Phase 2.4).
 
-## Phase 2 – Differentiators ⏸ (needs Phase 1 sign-off)
+## Phase 2 – Differentiators 🧪 (v1.2)
 
-| # | Feature | Notes / risk |
+| # | Feature | Status / notes |
 |---|---|---|
-| 2.1 | **My Notes dashboard + search** | Lists all noted emails, searchable by note text and filterable by colour; click to open the email. Uses a small index in roaming settings (32 KB cap, so a few hundred notes). Item IDs change when an email is moved, so the dashboard needs a fallback. |
-| 2.2 | **Export to CSV** | From the dashboard index |
-| 2.3 | **Shared mailbox support** | Notes on reception@ / accounts@ visible to everyone with access. Needs `SupportsSharedFolders` and Mailbox 1.13, plus testing. |
-| 2.4 | **Notes while composing** (emails and organiser meetings) | Custom properties in compose mode persist to Sent Items. Categories can't be set in compose mode on web/new Outlook. |
-| 2.5 | **Mobile** (Outlook iOS/Android) | Manifest `MobileFormFactor` plus testing. Reminder button not available on mobile. |
+| 2.1 | **All notes dashboard + search** | ✅ Built. "All notes" tab: search subject, sender and note text (first 160 characters); filter by colour; click to open. Index lives in roaming settings (32 KB). **Real capacity: about 60–120 notes**, depending on subject and note length. When full, the oldest "Done" notes drop off the list first; the notes themselves stay on their emails. Notes written before v1.2 appear once each email is opened. Moved emails refresh their link when opened. |
+| 2.2 | **Export to CSV** | ✅ Built. Exports what's listed (after search/filter). Download, or Copy as a fallback. Cells starting with = + - @ are neutralised (formula-injection protection). UTF-8 BOM so Excel shows symbols correctly. |
+| 2.3 | **Shared mailbox support** | ✅ Built, **needs real test**. `SupportsSharedFolders` on. Pane shows "Shared mailbox (owner): everyone with access can see this note." Delegates can't create categories, so the mailbox owner/admin must create the colour categories in the shared mailbox. |
+| 2.4 | **Notes while composing** (emails and organiser meetings) | ✅ Built, **needs real test**. Note saved on the draft and kept on the Sent Items copy. No category or dashboard entry on a draft (Outlook limitation). Both apply when the sent item is opened. Reminder hidden in compose. |
+| 2.5 | **Mobile** (Outlook iOS/Android) | ✅ Built, **needs real test**. Mobile button on received emails. Notes, colours (saved, but no inbox tag on mobile), quick notes and dashboard work. Not on mobile (Microsoft limits): reminder, opening items from the dashboard, inbox colour tags. |
+
+Fallback: `manifest-desktop.xml` is the same v1.2 manifest without the mobile section, for use if Outlook rejects `manifest.xml`.
 
 ## Phase 3 – Optional / on demand ⏸
 

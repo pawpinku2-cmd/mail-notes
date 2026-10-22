@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  My Mail Notes – Outlook add-in manifest.
-  Works in Outlook on the web, new Outlook for Windows and classic Outlook for Windows/Mac.
+  My Mail Notes – Outlook add-in manifest v1.2.0.0.
+  Outlook on the web, new Outlook and classic Outlook (Windows/Mac), plus Outlook mobile.
   Configured for https://pawpinku2-cmd.github.io/mail-notes
 -->
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
@@ -10,7 +10,7 @@
            xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
            xsi:type="MailApp">
   <Id>3e50212e-1253-46ed-a84c-7bbfd1341cf8</Id>
-  <Version>1.1.0.0</Version>
+  <Version>1.2.0.0</Version>
   <ProviderName>Onovo IT</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="My Mail Notes"/>
@@ -23,7 +23,7 @@
   </Hosts>
   <Requirements>
     <Sets>
-      <Set Name="Mailbox" MinVersion="1.8"/>
+      <Set Name="Mailbox" MinVersion="1.5"/>
     </Sets>
   </Requirements>
   <FormSettings>
@@ -33,26 +33,34 @@
         <RequestedHeight>250</RequestedHeight>
       </DesktopSettings>
     </Form>
+    <Form xsi:type="ItemEdit">
+      <DesktopSettings>
+        <SourceLocation DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/taskpane.html"/>
+      </DesktopSettings>
+    </Form>
   </FormSettings>
-  <!-- Least privilege: the open email only. ReadWriteItem is needed to set the "Note" category.
-       No access to other emails, no mailbox-wide access, no network permissions. -->
+  <!-- Least privilege: the open item only. ReadWriteItem is needed to set the colour category.
+       No access to other items, no mailbox-wide access, no network permissions. -->
   <Permissions>ReadWriteItem</Permissions>
   <Rule xsi:type="RuleCollection" Mode="Or">
     <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/>
+    <Rule xsi:type="ItemIs" ItemType="Message" FormType="Edit"/>
     <Rule xsi:type="ItemIs" ItemType="Appointment" FormType="Read"/>
+    <Rule xsi:type="ItemIs" ItemType="Appointment" FormType="Edit"/>
   </Rule>
   <DisableEntityHighlighting>true</DisableEntityHighlighting>
 
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
     <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
       <Requirements>
-        <bt:Sets DefaultMinVersion="1.8">
+        <bt:Sets DefaultMinVersion="1.5">
           <bt:Set Name="Mailbox"/>
         </bt:Sets>
       </Requirements>
       <Hosts>
         <Host xsi:type="MailHost">
           <DesktopFormFactor>
+            <SupportsSharedFolders>true</SupportsSharedFolders>
             <ExtensionPoint xsi:type="MessageReadCommandSurface">
               <OfficeTab id="TabDefault">
                 <Group id="mailNotesGroup">
@@ -71,6 +79,28 @@
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="Taskpane.Url"/>
                       <SupportsPinning>true</SupportsPinning>
+                    </Action>
+                  </Control>
+                </Group>
+              </OfficeTab>
+            </ExtensionPoint>
+            <ExtensionPoint xsi:type="MessageComposeCommandSurface">
+              <OfficeTab id="TabDefault">
+                <Group id="mailNotesComposeGroup">
+                  <Label resid="GroupLabel"/>
+                  <Control xsi:type="Button" id="mailNotesOpenPaneCompose">
+                    <Label resid="PaneButton.Label"/>
+                    <Supertip>
+                      <Title resid="PaneButton.Label"/>
+                      <Description resid="PaneButton.Tooltip"/>
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="Icon.16"/>
+                      <bt:Image size="32" resid="Icon.32"/>
+                      <bt:Image size="80" resid="Icon.80"/>
+                    </Icon>
+                    <Action xsi:type="ShowTaskpane">
+                      <SourceLocation resid="Taskpane.Url"/>
                     </Action>
                   </Control>
                 </Group>
@@ -99,7 +129,53 @@
                 </Group>
               </OfficeTab>
             </ExtensionPoint>
+            <ExtensionPoint xsi:type="AppointmentOrganizerCommandSurface">
+              <OfficeTab id="TabDefault">
+                <Group id="mailNotesOrgGroup">
+                  <Label resid="GroupLabel"/>
+                  <Control xsi:type="Button" id="mailNotesOpenPaneOrg">
+                    <Label resid="PaneButton.Label"/>
+                    <Supertip>
+                      <Title resid="PaneButton.Label"/>
+                      <Description resid="PaneButton.Tooltip"/>
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="Icon.16"/>
+                      <bt:Image size="32" resid="Icon.32"/>
+                      <bt:Image size="80" resid="Icon.80"/>
+                    </Icon>
+                    <Action xsi:type="ShowTaskpane">
+                      <SourceLocation resid="Taskpane.Url"/>
+                    </Action>
+                  </Control>
+                </Group>
+              </OfficeTab>
+            </ExtensionPoint>
           </DesktopFormFactor>
+          <MobileFormFactor>
+            <ExtensionPoint xsi:type="MobileMessageReadCommandSurface">
+              <Group id="mailNotesMobileGroup">
+                <Label resid="GroupLabel"/>
+                <Control xsi:type="MobileButton" id="mailNotesMobileOpenPane">
+                  <Label resid="PaneButton.Label"/>
+                  <Icon>
+                    <bt:Image size="25" scale="1" resid="Icon.25"/>
+                    <bt:Image size="25" scale="2" resid="Icon.50"/>
+                    <bt:Image size="25" scale="3" resid="Icon.75"/>
+                    <bt:Image size="32" scale="1" resid="Icon.32"/>
+                    <bt:Image size="32" scale="2" resid="Icon.64"/>
+                    <bt:Image size="32" scale="3" resid="Icon.96"/>
+                    <bt:Image size="48" scale="1" resid="Icon.48"/>
+                    <bt:Image size="48" scale="2" resid="Icon.96b"/>
+                    <bt:Image size="48" scale="3" resid="Icon.144"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+              </Group>
+            </ExtensionPoint>
+          </MobileFormFactor>
         </Host>
       </Hosts>
       <Resources>
@@ -107,6 +183,14 @@
           <bt:Image id="Icon.16" DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-16.png"/>
           <bt:Image id="Icon.32" DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-32.png"/>
           <bt:Image id="Icon.80" DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-80.png"/>
+          <bt:Image id="Icon.25" DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-25.png"/>
+          <bt:Image id="Icon.50" DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-50.png"/>
+          <bt:Image id="Icon.75" DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-75.png"/>
+          <bt:Image id="Icon.64" DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-64.png"/>
+          <bt:Image id="Icon.96" DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-96.png"/>
+          <bt:Image id="Icon.48" DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-48.png"/>
+          <bt:Image id="Icon.96b" DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-96.png"/>
+          <bt:Image id="Icon.144" DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-144.png"/>
         </bt:Images>
         <bt:Urls>
           <bt:Url id="Taskpane.Url" DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/taskpane.html"/>

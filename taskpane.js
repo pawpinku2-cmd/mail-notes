@@ -6,7 +6,8 @@
  *    are only readable through this add-in.
  *  - Items with a note get an Outlook category ("Note" or a colour category such as
  *    "Note - Urgent") so they stand out in the inbox.
- *  - Quick-note presets are stored in this add-in's roaming settings (also in your mailbox).
+ *  - Quick-note presets and the "All notes" index (subject, sender, first 160 characters of
+ *    each note) are stored in this add-in's roaming settings, which also live in your mailbox.
  *  - No network calls, no sign-in, no server, no storage outside your mailbox.
  *  - Note text is only ever rendered with .value / .textContent.
  */
@@ -29,6 +30,9 @@
   const ALL_NOTE_CATEGORIES = COLOURS.map(function (c) { return c.category; });
   const colourById = function (id) { return COLOURS.find(function (c) { return c.id === id; }) || COLOURS[0]; };
 
+  const IDX_KEY = "idx";          // roaming-settings key for the All-notes index
+  const IDX_BUDGET = 29000;       // roaming settings cap is 32 KB per add-in; leave room for quick notes
+  const SNIPPET = 160;            // characters of note text kept in the index
   const QUICK_KEY = "quickNotes";
   const QUICK_MAX = 12;
   const QUICK_LEN = 60;
@@ -52,7 +56,11 @@
     savedMeta: null,   // { created, modified }
     timer: null,
     saving: false,
+    ctx: null,         // { compose, kind, subject, sender, key, itemId, shared }
+    view: "item",
   };
+
+  const env = { mobile: false, canOpen: false, canRemind: false };
 
   const $ = (id) => document.getElementById(id);
 
@@ -63,18 +71,31 @@
       fatal("This page is the My Mail Notes add-in. It only runs inside Outlook.");
       return;
     }
-    if (!Office.context.requirements.isSetSupported("Mailbox", "1.8")) {
+    if (!Office.context.requirements.isSetSupported("Mailbox", "1.5")) {
       fatal("This version of Outlook is too old for My Mail Notes. Update Outlook or use Outlook on the web.");
       return;
     }
+    detectEnv();
     buildColourButtons();
+    buildFilter();
     bindUi();
+    bindDashboard();
     renderQuickList();
+    renderAll();
     if (Office.context.requirements.isSetSupported("Mailbox", "1.5")) {
       Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, onItemChanged);
     }
     loadItem();
   });
+
+  function detectEnv() {
+    const d = Office.context.diagnostics || {};
+    env.mobile = /^(ios|android)$/i.test(String(d.platform || d.hostName || ""));
+    const mb = Office.context.mailbox;
+    env.canOpen = !env.mobile && typeof mb.displayMessageForm === "function";
+    env.canRemind = !env.mobile && typeof mb.displayNewAppointmentForm === "function";
+    document.documentElement.classList.toggle("mobile", env.mobile);
+  }
 
   function onItemChanged() {
     // Flush a pending autosave for the previous item before switching.
@@ -113,16 +134,60 @@
     hideConfirm();
     setLoading(true);
 
+    state.ctx = null;
+    $("shared-line").hidden = true;
+
     if (!isSupportedItem(item)) {
       setLoading(false);
       $("content").hidden = true;
       $("context-line").textContent = "Select an email or meeting to see or add a note.";
+      renderAll();
+      if (state.view === "item") showView("all");   // nothing selected: show the dashboard
       return;
     }
-    const subject = subjectOf(item);
+    const compose = isCompose(item);
     const kind = isMeeting(item) ? "meeting" : "email";
-    $("context-line").textContent = subject ? "Private note for " + kind + ": " + subject : "Private note for this " + kind;
-    $("note").placeholder = "Type a private note for this " + kind + "…";
+    const ctx = state.ctx = {
+      compose: compose,
+      kind: kind,
+      subject: compose ? "" : subjectOf(item),
+      sender: compose ? "" : senderOf(item),
+      key: null,
+      itemId: compose ? null : (item.itemId || null),
+      shared: null,
+    };
+    setContextLine();
+    $("note").placeholder = compose
+      ? "Type a private note. It stays on your copy after you send or save."
+      : "Type a private note for this " + kind + "…";
+    $("remind-btn").hidden = compose || !env.canRemind;
+    if (compose && item.subject && typeof item.subject.getAsync === "function") {
+      item.subject.getAsync(function (r) {
+        if (seq !== state.seq || r.status !== Office.AsyncResultStatus.Succeeded) return;
+        ctx.subject = r.value || "";
+        setContextLine();
+      });
+    }
+    if (typeof item.getSharedPropertiesAsync === "function") {
+      try {
+        item.getSharedPropertiesAsync(function (r) {
+          if (seq !== state.seq || r.status !== Office.AsyncResultStatus.Succeeded || !r.value) return;
+          ctx.shared = String(r.value.owner || "").toLowerCase() || "shared";
+          const line = $("shared-line");
+          line.textContent = "Shared mailbox" + (r.value.owner ? " (" + r.value.owner + ")" : "") +
+            ": everyone with access to this mailbox can see this note.";
+          line.hidden = false;
+        });
+      } catch (e) { /* not shared or not supported */ }
+    }
+    if (!compose) {
+      itemKey(item).then(function (k) {
+        if (seq !== state.seq) return;
+        ctx.key = k;
+        if (state.savedMeta && state.saved) indexUpsertFromState(true);
+        renderAll();
+      });
+    }
 
     item.loadCustomPropertiesAsync(function (r) {
       if (seq !== state.seq) return;
@@ -142,6 +207,8 @@
       $("content").hidden = false;
       updateUi();
       if (data && data.text) syncCategories(item, data.colour, seq, true);
+      if (data && data.text && ctx.key) indexUpsertFromState(true);
+      if (state.view === "all") showView("item");
     });
   }
 
@@ -181,6 +248,7 @@
       const seq = state.seq;
       if (!props) return resolve();
 
+      const ctxSnapshot = state.ctx;
       const text = clean($("note").value);
       const colour = state.colour;
       if (text === state.saved && (colour === state.savedColour || !text)) { updateUi(); return resolve(); }
@@ -217,6 +285,7 @@
           updateUi();
         }
         syncCategories(item, colour, seq, silent);
+        if (ctxSnapshot && ctxSnapshot.key) indexUpsert(entryFrom(ctxSnapshot, value));
         resolve();
       });
     });
@@ -227,6 +296,7 @@
       const props = state.props;
       const item = state.item;
       const seq = state.seq;
+      const ctxSnapshot = state.ctx;
       if (!props) return resolve();
       props.remove(PROP);
       props.saveAsync(function (r) {
@@ -244,6 +314,7 @@
           if (!silent) showBanner("ok", "Note deleted.", 2500);
         }
         syncCategories(item, null, seq, true);
+        if (ctxSnapshot && ctxSnapshot.key) indexRemove(ctxSnapshot.key);
         resolve();
       });
     });
@@ -255,7 +326,9 @@
   // Adds the wanted category first and only then removes the others, so a missing colour
   // category never leaves the item unmarked.
   function syncCategories(item, colour, seq, silent) {
-    if (!item || !item.categories) return;
+    // Categories can't be set on drafts in web/new Outlook and aren't available on mobile.
+    // They're applied the next time the item is opened in read mode.
+    if (!item || !item.categories || isCompose(item)) return;
     const want = colour ? colourById(colour).category : null;
     item.categories.getAsync(function (r) {
       if (r.status !== Office.AsyncResultStatus.Succeeded) return;
@@ -394,7 +467,7 @@
 
   function openReminder() {
     const item = state.item;
-    if (!item) return;
+    if (!item || !env.canRemind || (state.ctx && state.ctx.compose)) return;
     const start = new Date();
     start.setDate(start.getDate() + 1);
     start.setHours(9, 0, 0, 0);
@@ -420,6 +493,274 @@
       });
     } catch (e) {
       showBanner("error", "Couldn't open a new calendar event here. " + (e && e.message ? e.message : ""));
+    }
+  }
+
+  /* ------------------------------------------------- All-notes index (dashboard) */
+
+  const index = { entries: [], evicted: 0, timer: null };
+
+  function loadIndex() {
+    let v = null;
+    try { v = Office.context.roamingSettings.get(IDX_KEY); } catch (e) { v = null; }
+    const list = v && Array.isArray(v.e) ? v.e : [];
+    index.entries = list.filter(function (e) { return e && typeof e.k === "string" && typeof e.t === "string"; });
+    index.evicted = v && typeof v.x === "number" ? v.x : 0;
+  }
+
+  function entryFrom(ctx, value) {
+    return {
+      k: ctx.key,
+      i: ctx.itemId || "",
+      y: ctx.kind === "meeting" ? "m" : "e",
+      s: truncate(ctx.subject || "(no subject)", 80),
+      f: truncate(ctx.sender || "", 60),
+      c: value.colour || "none",
+      t: truncate(value.text || "", SNIPPET),
+      m: value.modified || new Date().toISOString(),
+      o: ctx.shared || "",
+    };
+  }
+
+  // Refresh the entry for the open item (e.g. new item ID after a move, or note pre-dates the index).
+  function indexUpsertFromState(onlyIfChanged) {
+    const c = state.ctx;
+    if (!c || !c.key || !state.saved || !state.savedMeta) return;
+    const e = entryFrom(c, { text: state.saved, colour: state.savedColour, modified: state.savedMeta.modified });
+    if (onlyIfChanged) {
+      const cur = index.entries.find(function (x) { return x.k === e.k; });
+      if (cur && JSON.stringify(cur) === JSON.stringify(e)) return;
+    }
+    indexUpsert(e);
+  }
+
+  function indexUpsert(e) {
+    index.entries = index.entries.filter(function (x) { return x.k !== e.k; });
+    index.entries.unshift(e);
+    enforceBudget();
+    saveIndexSoon();
+    renderAll();
+  }
+
+  function indexRemove(k) {
+    const before = index.entries.length;
+    index.entries = index.entries.filter(function (x) { return x.k !== k; });
+    if (index.entries.length !== before) { saveIndexSoon(); renderAll(); }
+  }
+
+  // Keep the index under the roaming-settings budget: drop oldest "Done" notes first, then oldest.
+  function enforceBudget() {
+    index.entries.sort(function (a, b) { return a.m < b.m ? 1 : a.m > b.m ? -1 : 0; });
+    const size = function () { return JSON.stringify({ v: 1, x: index.evicted, e: index.entries }).length; };
+    while (index.entries.length && size() > IDX_BUDGET) {
+      let at = -1;
+      for (let i = index.entries.length - 1; i >= 0; i--) { if (index.entries[i].c === "done") { at = i; break; } }
+      if (at === -1) at = index.entries.length - 1;
+      index.entries.splice(at, 1);
+      index.evicted++;
+    }
+  }
+
+  function saveIndexSoon() {
+    clearTimeout(index.timer);
+    index.timer = setTimeout(function () {
+      try {
+        Office.context.roamingSettings.set(IDX_KEY, { v: 1, x: index.evicted, e: index.entries });
+        Office.context.roamingSettings.saveAsync(function (r) {
+          if (r.status !== Office.AsyncResultStatus.Succeeded) {
+            showBanner("error", "Couldn't update the All notes list. " + errText(r));
+          }
+        });
+      } catch (e) {
+        showBanner("error", "Couldn't update the All notes list: " + (e && e.message ? e.message : e));
+      }
+    }, 600);
+  }
+
+  function buildFilter() {
+    const sel = $("filter");
+    COLOURS.forEach(function (c) {
+      const o = document.createElement("option");
+      o.value = c.id;
+      o.textContent = c.id === "none" ? "No colour" : c.label;
+      sel.append(o);
+    });
+  }
+
+  function bindDashboard() {
+    loadIndex();
+    $("tab-item").addEventListener("click", function () { showView("item"); });
+    $("tab-all").addEventListener("click", function () { showView("all"); });
+    $("search").addEventListener("input", renderAll);
+    $("filter").addEventListener("change", renderAll);
+    $("export-btn").addEventListener("click", openExport);
+    $("export-close").addEventListener("click", function () { $("export-panel").hidden = true; });
+    $("export-copy").addEventListener("click", copyExport);
+    $("export-download").addEventListener("click", downloadExport);
+  }
+
+  function showView(v) {
+    state.view = v;
+    $("tab-item").setAttribute("aria-selected", String(v === "item"));
+    $("tab-all").setAttribute("aria-selected", String(v === "all"));
+    $("view-item").hidden = v !== "item";
+    $("view-all").hidden = v !== "all";
+    if (v === "all") renderAll();
+  }
+
+  function filteredEntries() {
+    const terms = $("search").value.toLowerCase().split(/\s+/).filter(Boolean);
+    const colour = $("filter").value;
+    return index.entries.filter(function (e) {
+      if (colour && e.c !== colour) return false;
+      const hay = (e.s + " " + e.f + " " + e.t + " " + e.o).toLowerCase();
+      return terms.every(function (t) { return hay.indexOf(t) !== -1; });
+    });
+  }
+
+  function renderAll() {
+    $("all-count").textContent = index.entries.length ? "(" + index.entries.length + ")" : "";
+    if ($("view-all").hidden) return;
+    const terms = $("search").value.split(/\s+/).filter(Boolean);
+    const list = filteredEntries();
+    const ul = $("all-list");
+    ul.replaceChildren();
+    list.forEach(function (e) {
+      const li = document.createElement("li");
+      li.className = "all-item" + (state.ctx && state.ctx.key === e.k ? " current" : "");
+      li.tabIndex = 0;
+      li.setAttribute("role", "button");
+      li.title = env.canOpen ? "Open this " + (e.y === "m" ? "meeting" : "email") : "";
+      const top = document.createElement("div");
+      top.className = "all-top";
+      const subj = document.createElement("span");
+      subj.className = "all-subj";
+      const dot = document.createElement("span");
+      dot.className = "dotc";
+      dot.dataset.c = e.c;
+      subj.append(dot);
+      highlight(subj, e.s, terms);
+      if (e.y === "m") subj.append(badge("Meeting"));
+      if (e.o) subj.append(badge("Shared"));
+      const when = document.createElement("span");
+      when.className = "all-when";
+      when.textContent = fmt(e.m);
+      top.append(subj, when);
+      const from = document.createElement("div");
+      from.className = "all-from";
+      highlight(from, e.f || (e.o ? e.o : ""), terms);
+      const text = document.createElement("div");
+      text.className = "all-text";
+      highlight(text, e.t, terms);
+      li.append(top, from, text);
+      li.addEventListener("click", function () { openEntry(e); });
+      li.addEventListener("keydown", function (ev) { if (ev.key === "Enter") openEntry(e); });
+      ul.append(li);
+    });
+    $("all-empty").hidden = list.length > 0;
+    $("all-empty").textContent = index.entries.length
+      ? "No notes match your search."
+      : "No notes yet. Notes you add (or open) appear here.";
+    const pct = Math.round(JSON.stringify({ v: 1, x: index.evicted, e: index.entries }).length / IDX_BUDGET * 100);
+    $("capacity").textContent = index.entries.length + " note" + (index.entries.length === 1 ? "" : "s") + " · list " + pct + "% full";
+    const hints = [];
+    hints.push(env.canOpen
+      ? "Click a note to open it. If an email doesn't open, it was moved: find it in Outlook and open it once to refresh the link."
+      : "Open the email from your inbox to edit its note (search Outlook for the subject).");
+    if (index.evicted) hints.push("The list keeps your most recent notes. Older notes are still saved on their emails.");
+    $("all-hint").textContent = hints.join(" ");
+    $("export-btn").disabled = list.length === 0;
+  }
+
+  function badge(text) {
+    const b = document.createElement("span");
+    b.className = "badge";
+    b.textContent = text;
+    return b;
+  }
+
+  // Appends text to el, wrapping search terms in <mark>. Uses text nodes only (no HTML parsing).
+  function highlight(el, text, terms) {
+    text = String(text || "");
+    if (!terms.length) { el.append(document.createTextNode(text)); return; }
+    const re = new RegExp("(" + terms.map(function (t) { return t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }).join("|") + ")", "ig");
+    let last = 0;
+    text.replace(re, function (m, _g, off) {
+      if (off > last) el.append(document.createTextNode(text.slice(last, off)));
+      const mk = document.createElement("mark");
+      mk.textContent = m;
+      el.append(mk);
+      last = off + m.length;
+      return m;
+    });
+    if (last < text.length) el.append(document.createTextNode(text.slice(last)));
+  }
+
+  function openEntry(e) {
+    if (!env.canOpen || !e.i) {
+      showBanner("info", 'Open it from Outlook: search for "' + e.s + '".');
+      return;
+    }
+    try {
+      if (e.y === "m") Office.context.mailbox.displayAppointmentForm(e.i);
+      else Office.context.mailbox.displayMessageForm(e.i);
+    } catch (err) {
+      showBanner("info", 'Couldn\'t open it from here. Search Outlook for "' + e.s + '".');
+    }
+  }
+
+  /* ------------------------------------------------------------- CSV export */
+
+  function csvCell(v) {
+    let s = String(v == null ? "" : v);
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;          // stop spreadsheet formula injection
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+
+  function buildCsv(list) {
+    const rows = [["Subject", "From", "Type", "Colour", "Note (first " + SNIPPET + " characters)", "Last edited", "Shared mailbox"]];
+    list.forEach(function (e) {
+      rows.push([e.s, e.f, e.y === "m" ? "Meeting" : "Email", colourById(e.c).label, e.t, fmtFull(e.m), e.o]);
+    });
+    return rows.map(function (r) { return r.map(csvCell).join(","); }).join("\r\n");
+  }
+
+  let exportCsv = "";   // keep the exact CSV (textarea values normalise CRLF to LF)
+  function openExport() {
+    exportCsv = buildCsv(filteredEntries());
+    $("export-text").value = exportCsv;
+    $("export-panel").hidden = false;
+  }
+
+  function copyExport() {
+    const ta = $("export-text");
+    const done = function () { showBanner("ok", "Copied. Paste into Excel or Notepad.", 2500); };
+    const fallback = function () {
+      ta.focus(); ta.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      if (ok) done(); else showBanner("info", "Press Ctrl+C (Cmd+C on Mac) to copy the selected text.");
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(exportCsv).then(done, fallback);
+    } else {
+      fallback();
+    }
+  }
+
+  function downloadExport() {
+    try {
+      const blob = new Blob(["\ufeff" + exportCsv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "my-mail-notes-" + new Date().toISOString().slice(0, 10) + ".csv";
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+    } catch (e) {
+      showBanner("info", "Download isn't allowed here. Use Copy instead.");
     }
   }
 
@@ -538,6 +879,44 @@
   }
 
   /* ------------------------------------------------------------- helpers */
+
+  function isCompose(item) {
+    return !!(item && item.subject && typeof item.subject !== "string" && typeof item.subject.getAsync === "function");
+  }
+
+  function setContextLine() {
+    const c = state.ctx;
+    if (!c) return;
+    const what = c.compose ? (c.kind === "meeting" ? "this meeting (draft)" : "this draft") : "this " + c.kind;
+    $("context-line").textContent = c.subject
+      ? "Private note for " + (c.compose ? what : c.kind) + ": " + c.subject
+      : "Private note for " + what;
+  }
+
+  // Stable key for the index: survives moving the email between folders.
+  function itemKey(item) {
+    const basis = (item.internetMessageId && "m:" + item.internetMessageId) || (item.itemId && "i:" + item.itemId) || "";
+    if (!basis) return Promise.resolve(null);
+    return sha256(basis).then(function (h) { return h.slice(0, 20); });
+  }
+
+  function sha256(text) {
+    if (window.crypto && crypto.subtle && window.TextEncoder) {
+      return crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)).then(function (buf) {
+        return Array.from(new Uint8Array(buf), function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+      }).catch(function () { return fnv(text); });
+    }
+    return Promise.resolve(fnv(text));
+  }
+
+  function fnv(text) { // fallback only
+    let h1 = 0x811c9dc5, h2 = 0x01000193;
+    for (let i = 0; i < text.length; i++) {
+      h1 = Math.imul(h1 ^ text.charCodeAt(i), 16777619) >>> 0;
+      h2 = Math.imul(h2 ^ text.charCodeAt(i), 2246822519) >>> 0;
+    }
+    return ("00000000" + h1.toString(16)).slice(-8) + ("00000000" + h2.toString(16)).slice(-8) + "0000";
+  }
 
   function subjectOf(item) {
     const s = item.normalizedSubject || item.subject;

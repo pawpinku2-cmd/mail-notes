@@ -18,10 +18,17 @@
   <main id="app" aria-busy="true">
     <header class="top">
       <h1>My Mail Notes</h1>
-      <p class="sub" id="context-line">Private note for this email</p>
+      <div class="tabs" role="tablist" aria-label="View">
+        <button type="button" role="tab" id="tab-item" class="tab" aria-selected="true" aria-controls="view-item">This item</button>
+        <button type="button" role="tab" id="tab-all" class="tab" aria-selected="false" aria-controls="view-all">All notes <span id="all-count" class="count"></span></button>
+      </div>
     </header>
 
     <div id="banner" class="banner" role="status" aria-live="polite" hidden></div>
+
+    <div id="view-item" role="tabpanel" aria-labelledby="tab-item">
+    <p class="sub" id="context-line">Private note for this email</p>
+    <p class="shared-line" id="shared-line" hidden></p>
 
     <section id="loading" class="loading">
       <span class="spinner" aria-hidden="true"></span>
@@ -76,6 +83,36 @@
         <div class="warn-actions">
           <button type="button" id="confirm-yes" class="btn danger small">Delete</button>
           <button type="button" id="confirm-no" class="btn small">Cancel</button>
+        </div>
+      </div>
+    </section>
+    </div>
+
+    <section id="view-all" role="tabpanel" aria-labelledby="tab-all" hidden>
+      <div class="search-row">
+        <label for="search" class="visually-hidden">Search notes</label>
+        <input id="search" type="search" placeholder="Search notes, subjects, senders…" autocomplete="off">
+        <label for="filter" class="visually-hidden">Filter by colour</label>
+        <select id="filter">
+          <option value="">All colours</option>
+        </select>
+      </div>
+      <ul id="all-list" class="all-list" aria-label="All notes"></ul>
+      <p id="all-empty" class="empty" hidden>No notes yet. Notes you add (or open) appear here.</p>
+      <p class="hint" id="all-hint"></p>
+      <div class="row actions">
+        <span id="capacity" class="hint"></span>
+        <span class="spacer"></span>
+        <button type="button" id="export-btn" class="btn small">Export CSV</button>
+      </div>
+      <div id="export-panel" class="export" hidden>
+        <p class="hint">Export of the notes listed above. If the download doesn't start, use Copy and paste into Excel or Notepad.</p>
+        <textarea id="export-text" rows="6" readonly aria-label="CSV export"></textarea>
+        <div class="row actions">
+          <button type="button" id="export-close" class="btn small">Close</button>
+          <span class="spacer"></span>
+          <button type="button" id="export-copy" class="btn small">Copy</button>
+          <button type="button" id="export-download" class="btn primary small">Download .csv</button>
         </div>
       </div>
     </section>
