@@ -1,28 +1,55 @@
-/* My Mail Notes – private notes on emails (Outlook add-in).
+/* My Mail Notes – private notes on emails and meetings (Outlook add-in).
  *
  * How it works:
- *  - The note is saved as a custom property on the email item, in your own mailbox
+ *  - The note is saved as a custom property on the item, in your own mailbox
  *    (Office.js CustomProperties). Custom properties are not sent to recipients, and
  *    are only readable through this add-in.
- *  - Emails that have a note get the Outlook category "Note" so they stand out in the inbox.
+ *  - Items with a note get an Outlook category ("Note" or a colour category such as
+ *    "Note - Urgent") so they stand out in the inbox.
+ *  - Quick-note presets are stored in this add-in's roaming settings (also in your mailbox).
  *  - No network calls, no sign-in, no server, no storage outside your mailbox.
- *  - Note text is only ever rendered with .value / .textContent (never innerHTML).
+ *  - Note text is only ever rendered with .value / .textContent.
  */
 (function () {
   "use strict";
 
   const PROP = "mailnote";        // custom property name
-  const CATEGORY = "Note";        // Outlook category used as the inbox marker
   const MAX_TEXT = 2000;          // characters of note text
   const MAX_JSON = 2500;          // Outlook limit for all custom properties on one item
   const AUTOSAVE_MS = 1200;
 
+  // Colour -> Outlook category. "none" uses the plain marker.
+  const COLOURS = [
+    { id: "none",     label: "None",      category: "Note",             outlook: "any colour" },
+    { id: "urgent",   label: "Urgent",    category: "Note - Urgent",    outlook: "Red" },
+    { id: "followup", label: "Follow-up", category: "Note - Follow-up", outlook: "Orange" },
+    { id: "info",     label: "Info",      category: "Note - Info",      outlook: "Blue" },
+    { id: "done",     label: "Done",      category: "Note - Done",      outlook: "Green" },
+  ];
+  const ALL_NOTE_CATEGORIES = COLOURS.map(function (c) { return c.category; });
+  const colourById = function (id) { return COLOURS.find(function (c) { return c.id === id; }) || COLOURS[0]; };
+
+  const QUICK_KEY = "quickNotes";
+  const QUICK_MAX = 12;
+  const QUICK_LEN = 60;
+  const QUICK_DEFAULTS = [
+    "Called – no answer",
+    "Left voicemail",
+    "Waiting on reply",
+    "Waiting on PO",
+    "Sent to accounts",
+    "Escalated",
+    "Done – no further action",
+  ];
+
   const state = {
-    seq: 0,          // bumps on every item change so late callbacks are ignored
+    seq: 0,            // bumps on every item change so late callbacks are ignored
     item: null,
-    props: null,     // CustomProperties for the current item
-    saved: "",       // last saved text
-    savedMeta: null, // { created, modified }
+    props: null,       // CustomProperties for the current item
+    saved: "",         // last saved text
+    savedColour: "none",
+    colour: "none",    // colour selected in the UI
+    savedMeta: null,   // { created, modified }
     timer: null,
     saving: false,
   };
@@ -40,7 +67,9 @@
       fatal("This version of Outlook is too old for My Mail Notes. Update Outlook or use Outlook on the web.");
       return;
     }
+    buildColourButtons();
     bindUi();
+    renderQuickList();
     if (Office.context.requirements.isSetSupported("Mailbox", "1.5")) {
       Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, onItemChanged);
     }
@@ -48,11 +77,11 @@
   });
 
   function onItemChanged() {
-    // Flush a pending autosave for the previous email before switching.
+    // Flush a pending autosave for the previous item before switching.
     const pending = state.timer !== null;
     clearTimeout(state.timer);
     state.timer = null;
-    if (pending && state.props && $("note").value.trim() !== state.saved) {
+    if (pending && state.props && isDirty()) {
       saveNow(true).finally(loadItem);
     } else {
       loadItem();
@@ -61,42 +90,58 @@
 
   /* --------------------------------------------------------------- load */
 
+  function isSupportedItem(item) {
+    if (!item) return false;
+    const t = Office.MailboxEnums.ItemType;
+    return item.itemType === t.Message || item.itemType === t.Appointment;
+  }
+
+  function isMeeting(item) {
+    return item && item.itemType === Office.MailboxEnums.ItemType.Appointment;
+  }
+
   function loadItem() {
     const seq = ++state.seq;
     const item = Office.context.mailbox.item;
     state.item = item;
     state.props = null;
     state.saved = "";
+    state.savedColour = "none";
+    state.colour = "none";
     state.savedMeta = null;
     hideBanner();
     hideConfirm();
     setLoading(true);
 
-    if (!item || item.itemType !== Office.MailboxEnums.ItemType.Message) {
+    if (!isSupportedItem(item)) {
       setLoading(false);
       $("content").hidden = true;
-      $("context-line").textContent = "Select an email to see or add a note.";
+      $("context-line").textContent = "Select an email or meeting to see or add a note.";
       return;
     }
-    const subject = item.normalizedSubject || item.subject || "";
-    $("context-line").textContent = subject ? "Private note for: " + subject : "Private note for this email";
+    const subject = subjectOf(item);
+    const kind = isMeeting(item) ? "meeting" : "email";
+    $("context-line").textContent = subject ? "Private note for " + kind + ": " + subject : "Private note for this " + kind;
+    $("note").placeholder = "Type a private note for this " + kind + "…";
 
     item.loadCustomPropertiesAsync(function (r) {
       if (seq !== state.seq) return;
       setLoading(false);
       if (r.status !== Office.AsyncResultStatus.Succeeded) {
         $("content").hidden = true;
-        showBanner("error", "Couldn't load the note for this email. " + errText(r));
+        showBanner("error", "Couldn't load the note for this item. " + errText(r));
         return;
       }
       state.props = r.value;
       const data = parse(state.props.get(PROP));
       state.saved = data ? data.text : "";
+      state.savedColour = data ? data.colour : "none";
+      state.colour = state.savedColour;
       state.savedMeta = data;
       $("note").value = state.saved;
       $("content").hidden = false;
       updateUi();
-      if (data && data.text) ensureCategory(item, seq);
+      if (data && data.text) syncCategories(item, data.colour, seq, true);
     });
   }
 
@@ -105,13 +150,22 @@
     try {
       const o = typeof v === "string" ? JSON.parse(v) : v;
       if (o && typeof o.text === "string") {
-        return { text: o.text, created: o.created || null, modified: o.modified || null };
+        return {
+          text: o.text,
+          colour: COLOURS.some(function (c) { return c.id === o.colour; }) ? o.colour : "none",
+          created: o.created || null,
+          modified: o.modified || null,
+        };
       }
     } catch (e) { /* ignore corrupt value */ }
     return null;
   }
 
   /* --------------------------------------------------------------- save */
+
+  function isDirty() {
+    return clean($("note").value) !== state.saved || (state.saved && state.colour !== state.savedColour);
+  }
 
   function scheduleSave() {
     clearTimeout(state.timer);
@@ -128,13 +182,15 @@
       if (!props) return resolve();
 
       const text = clean($("note").value);
-      if (text === state.saved) { updateUi(); return resolve(); }
+      const colour = state.colour;
+      if (text === state.saved && (colour === state.savedColour || !text)) { updateUi(); return resolve(); }
       if (!text) { deleteNote(silent).then(resolve); return; }
 
       const now = new Date().toISOString();
       const value = {
-        v: 1,
+        v: 2,
         text: text,
+        colour: colour,
         created: (state.savedMeta && state.savedMeta.created) || now,
         modified: now,
       };
@@ -156,10 +212,11 @@
         }
         if (seq === state.seq) {
           state.saved = text;
+          state.savedColour = colour;
           state.savedMeta = value;
           updateUi();
         }
-        ensureCategory(item, seq, silent);
+        syncCategories(item, colour, seq, silent);
         resolve();
       });
     });
@@ -179,36 +236,191 @@
         }
         if (seq === state.seq) {
           state.saved = "";
+          state.savedColour = "none";
+          state.colour = "none";
           state.savedMeta = null;
           $("note").value = "";
           updateUi();
           if (!silent) showBanner("ok", "Note deleted.", 2500);
         }
-        removeCategory(item);
+        syncCategories(item, null, seq, true);
         resolve();
       });
     });
   }
 
-  /* --------------------------------------------------- inbox marker (category) */
+  /* ------------------------------------------- inbox marker (categories) */
 
-  function ensureCategory(item, seq, silent) {
+  // colour = colour id to show, or null to remove all note categories.
+  // Adds the wanted category first and only then removes the others, so a missing colour
+  // category never leaves the item unmarked.
+  function syncCategories(item, colour, seq, silent) {
     if (!item || !item.categories) return;
+    const want = colour ? colourById(colour).category : null;
     item.categories.getAsync(function (r) {
       if (r.status !== Office.AsyncResultStatus.Succeeded) return;
-      const has = (r.value || []).some(function (c) { return c.displayName === CATEGORY; });
-      if (has) return;
-      item.categories.addAsync([CATEGORY], function (a) {
-        if (a.status === Office.AsyncResultStatus.Succeeded || silent || seq !== state.seq) return;
-        showBanner("info", 'Note saved. To mark emails that have notes, create an Outlook category called "' +
-          CATEGORY + '" (Settings > Mail > Categories). After that, emails get tagged automatically.');
+      const current = (r.value || []).map(function (c) { return c.displayName; });
+      const keepOnly = function (kept) {
+        const remove = current.filter(function (n) { return ALL_NOTE_CATEGORIES.indexOf(n) !== -1 && n !== kept; });
+        if (remove.length) item.categories.removeAsync(remove, function () { /* best effort */ });
+      };
+      const tell = function (text) { if (!silent && seq === state.seq) showBanner("info", text); };
+
+      if (!want) { keepOnly(null); return; }
+      if (current.indexOf(want) !== -1) { keepOnly(want); return; }
+
+      item.categories.addAsync([want], function (a) {
+        if (a.status === Office.AsyncResultStatus.Succeeded) { keepOnly(want); return; }
+        if (want === "Note") {
+          tell('Saved. To mark items that have notes, create an Outlook category called "Note" ' +
+            "(Settings > Mail > Categories). After that, items get tagged automatically.");
+          return;
+        }
+        // Colour category missing from this mailbox: fall back to the plain "Note" marker.
+        const c = colourById(colour);
+        const fallbackMsg = 'Saved. To colour this in your inbox, create an Outlook category called "' +
+          c.category + '" (' + c.outlook + ') in Settings > Mail > Categories. For now it\'s tagged "Note".';
+        if (current.indexOf("Note") !== -1) { keepOnly("Note"); tell(fallbackMsg); return; }
+        item.categories.addAsync(["Note"], function (b) {
+          if (b.status === Office.AsyncResultStatus.Succeeded) { keepOnly("Note"); tell(fallbackMsg); return; }
+          tell('Saved. To mark items that have notes, create Outlook categories called "Note" and "' +
+            c.category + '" in Settings > Mail > Categories.');
+        });
       });
     });
   }
 
-  function removeCategory(item) {
-    if (!item || !item.categories) return;
-    item.categories.removeAsync([CATEGORY], function () { /* best effort */ });
+  /* ---------------------------------------------------------- colours */
+
+  function buildColourButtons() {
+    const box = $("colours");
+    COLOURS.forEach(function (c) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "swatch";
+      b.dataset.c = c.id;
+      b.textContent = c.label;
+      b.title = c.id === "none" ? 'Tag as "Note"' : 'Tag as "' + c.category + '"';
+      b.setAttribute("aria-pressed", "false");
+      b.addEventListener("click", function () { setColour(c.id); });
+      box.append(b);
+    });
+  }
+
+  function setColour(id) {
+    state.colour = id;
+    renderColours();
+    if (clean($("note").value)) saveNow(false);
+    else updateUi();
+  }
+
+  function renderColours() {
+    document.querySelectorAll("#colours .swatch").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(b.dataset.c === state.colour));
+    });
+  }
+
+  /* ------------------------------------------------------- quick notes */
+
+  function getQuickNotes() {
+    try {
+      const v = Office.context.roamingSettings.get(QUICK_KEY);
+      if (Array.isArray(v) && v.length) return v.filter(function (s) { return typeof s === "string" && s.trim(); }).slice(0, QUICK_MAX);
+    } catch (e) { /* fall through */ }
+    return QUICK_DEFAULTS.slice();
+  }
+
+  function renderQuickList() {
+    const box = $("quick-list");
+    box.replaceChildren();
+    getQuickNotes().forEach(function (q) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip";
+      b.textContent = q;
+      b.title = "Add “" + q + "” with today's date and time";
+      b.addEventListener("click", function () { addQuickNote(q); });
+      box.append(b);
+    });
+  }
+
+  function addQuickNote(text) {
+    const ta = $("note");
+    const line = stampText() + text;
+    const cur = ta.value.replace(/\s+$/, "");
+    const next = cur ? cur + "\n" + line : line;
+    if (next.length > MAX_TEXT) {
+      setStatus("error", "Note is full. Remove some text before adding a quick note.");
+      return;
+    }
+    ta.value = next;
+    ta.scrollTop = ta.scrollHeight;
+    updateUi();
+    saveNow(false);
+  }
+
+  function openQuickEditor() {
+    $("quick-text").value = getQuickNotes().join("\n");
+    $("quick-editor").hidden = false;
+    $("quick-list").hidden = true;
+    $("quick-text").focus();
+  }
+
+  function closeQuickEditor() {
+    $("quick-editor").hidden = true;
+    $("quick-list").hidden = false;
+  }
+
+  function saveQuickNotes(list) {
+    try {
+      if (list) Office.context.roamingSettings.set(QUICK_KEY, list);
+      else Office.context.roamingSettings.remove(QUICK_KEY);
+    } catch (e) {
+      showBanner("error", "Couldn't save the quick-note list: " + e.message);
+      return;
+    }
+    Office.context.roamingSettings.saveAsync(function (r) {
+      if (r.status !== Office.AsyncResultStatus.Succeeded) {
+        showBanner("error", "Couldn't save the quick-note list. " + errText(r));
+        return;
+      }
+      renderQuickList();
+      closeQuickEditor();
+      showBanner("ok", "Quick notes saved.", 2000);
+    });
+  }
+
+  /* --------------------------------------------------------- reminder */
+
+  function openReminder() {
+    const item = state.item;
+    if (!item) return;
+    const start = new Date();
+    start.setDate(start.getDate() + 1);
+    start.setHours(9, 0, 0, 0);
+    const end = new Date(start.getTime() + 15 * 60000);
+    const subject = subjectOf(item) || "(no subject)";
+    const who = senderOf(item);
+    const note = clean($("note").value);
+    const body = [
+      "Follow-up reminder created from My Mail Notes.",
+      "",
+      (isMeeting(item) ? "Meeting: " : "Email: ") + subject,
+      who ? (isMeeting(item) ? "Organiser: " : "From: ") + who : "",
+      item.dateTimeCreated ? "Received: " + fmtFull(item.dateTimeCreated) : "",
+      "",
+      note ? "Note:\n" + note : "",
+    ].join("\n").replace(/\n{3,}/g, "\n\n").trim();
+    try {
+      Office.context.mailbox.displayNewAppointmentForm({
+        subject: truncate("Follow up: " + subject, 255),
+        start: start,
+        end: end,
+        body: truncate(body, 30000),
+      });
+    } catch (e) {
+      showBanner("error", "Couldn't open a new calendar event here. " + (e && e.message ? e.message : ""));
+    }
   }
 
   /* ------------------------------------------------------------------ UI */
@@ -220,23 +432,36 @@
     ta.addEventListener("blur", function () { if (state.timer) saveNow(false); });
     ta.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveNow(false); }
-    });
-    ta.addEventListener("keydown", function (e) {
       if (e.key.toLowerCase() === "d" && e.shiftKey && (e.ctrlKey || e.metaKey)) { e.preventDefault(); insertStamp(); }
     });
     $("stamp-btn").addEventListener("click", insertStamp);
+    $("remind-btn").addEventListener("click", openReminder);
     $("save-btn").addEventListener("click", function () { saveNow(false); });
     $("delete-btn").addEventListener("click", function () { $("confirm-delete").hidden = false; });
     $("confirm-no").addEventListener("click", hideConfirm);
     $("confirm-yes").addEventListener("click", function () { hideConfirm(); deleteNote(false); });
+    $("quick-edit").addEventListener("click", openQuickEditor);
+    $("quick-cancel").addEventListener("click", closeQuickEditor);
+    $("quick-reset").addEventListener("click", function () { saveQuickNotes(null); });
+    $("quick-save").addEventListener("click", function () {
+      const list = $("quick-text").value.split("\n")
+        .map(function (s) { return clean(s).slice(0, QUICK_LEN); })
+        .filter(Boolean)
+        .slice(0, QUICK_MAX);
+      saveQuickNotes(list.length ? list : null);
+    });
+  }
+
+  function stampText() {
+    const now = new Date();
+    return "[" + now.toLocaleDateString("en-AU") + " " +
+      now.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }) + "] ";
   }
 
   /* Insert "[22/10/2026 2:15 pm] " at the cursor, on its own line, then autosave. */
   function insertStamp() {
     const ta = $("note");
-    const now = new Date();
-    const stamp = "[" + now.toLocaleDateString("en-AU") + " " +
-      now.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }) + "] ";
+    const stamp = stampText();
     const start = ta.selectionStart, end = ta.selectionEnd;
     const before = ta.value.slice(0, start);
     const prefix = before && !before.endsWith("\n") ? "\n" : "";
@@ -266,9 +491,10 @@
     const current = $("note").value;
     $("char-count").textContent = current.length + " / " + MAX_TEXT;
     $("delete-btn").hidden = !state.saved;
+    renderColours();
     renderMeta();
     if (state.saving) return;
-    if (clean(current) !== state.saved) {
+    if (isDirty()) {
       setStatus("unsaved", "Unsaved changes");
     } else if (state.saved && state.savedMeta && state.savedMeta.modified) {
       setStatus("saved", "Saved " + fmt(state.savedMeta.modified));
@@ -285,9 +511,13 @@
 
   function hideConfirm() { $("confirm-delete").hidden = true; }
 
+  // While an item is loading, lock the editor so typing can't be overwritten by the incoming note.
   function setLoading(on) {
     $("loading").hidden = !on;
     $("app").setAttribute("aria-busy", on ? "true" : "false");
+    $("content").inert = on;
+    $("note").readOnly = on;
+    $("content").classList.toggle("busy", on);
   }
 
   let bannerTimer = null;
@@ -309,11 +539,26 @@
 
   /* ------------------------------------------------------------- helpers */
 
+  function subjectOf(item) {
+    const s = item.normalizedSubject || item.subject;
+    return typeof s === "string" ? s : "";
+  }
+
+  function senderOf(item) {
+    const p = isMeeting(item) ? item.organizer : (item.from || item.sender);
+    if (!p) return "";
+    return p.displayName && p.emailAddress ? p.displayName + " <" + p.emailAddress + ">" : (p.emailAddress || p.displayName || "");
+  }
+
   function clean(s) {
     return String(s || "")
       .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
       .trim()
       .slice(0, MAX_TEXT);
+  }
+
+  function truncate(s, n) {
+    return s.length > n ? s.slice(0, n - 1) + "…" : s;
   }
 
   function errText(r) {

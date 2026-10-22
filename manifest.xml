@@ -10,11 +10,11 @@
            xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
            xsi:type="MailApp">
   <Id>3e50212e-1253-46ed-a84c-7bbfd1341cf8</Id>
-  <Version>1.0.0.0</Version>
+  <Version>1.1.0.0</Version>
   <ProviderName>Onovo IT</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="My Mail Notes"/>
-  <Description DefaultValue="Add private notes to emails. Notes are stored on the email in your own mailbox and are never sent to anyone. Emails with notes are tagged with a Note category."/>
+  <Description DefaultValue="Add private notes to emails and meetings. Notes are stored on the item in your own mailbox and are never sent to anyone. Items with notes are tagged with a colour category."/>
   <IconUrl DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-64.png"/>
   <HighResolutionIconUrl DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-128.png"/>
   <SupportUrl DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/"/>
@@ -39,6 +39,7 @@
   <Permissions>ReadWriteItem</Permissions>
   <Rule xsi:type="RuleCollection" Mode="Or">
     <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/>
+    <Rule xsi:type="ItemIs" ItemType="Appointment" FormType="Read"/>
   </Rule>
   <DisableEntityHighlighting>true</DisableEntityHighlighting>
 
@@ -75,6 +76,29 @@
                 </Group>
               </OfficeTab>
             </ExtensionPoint>
+            <ExtensionPoint xsi:type="AppointmentAttendeeCommandSurface">
+              <OfficeTab id="TabDefault">
+                <Group id="mailNotesApptGroup">
+                  <Label resid="GroupLabel"/>
+                  <Control xsi:type="Button" id="mailNotesOpenPaneAppt">
+                    <Label resid="PaneButton.Label"/>
+                    <Supertip>
+                      <Title resid="PaneButton.Label"/>
+                      <Description resid="PaneButton.Tooltip"/>
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="Icon.16"/>
+                      <bt:Image size="32" resid="Icon.32"/>
+                      <bt:Image size="80" resid="Icon.80"/>
+                    </Icon>
+                    <Action xsi:type="ShowTaskpane">
+                      <SourceLocation resid="Taskpane.Url"/>
+                      <SupportsPinning>true</SupportsPinning>
+                    </Action>
+                  </Control>
+                </Group>
+              </OfficeTab>
+            </ExtensionPoint>
           </DesktopFormFactor>
         </Host>
       </Hosts>
@@ -92,7 +116,7 @@
           <bt:String id="PaneButton.Label" DefaultValue="Notes"/>
         </bt:ShortStrings>
         <bt:LongStrings>
-          <bt:String id="PaneButton.Tooltip" DefaultValue="View or add your private note for this email."/>
+          <bt:String id="PaneButton.Tooltip" DefaultValue="View or add your private note for this email or meeting."/>
         </bt:LongStrings>
       </Resources>
     </VersionOverrides>
