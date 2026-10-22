@@ -1,0 +1,24 @@
+name: Security check
+
+# Runs the add-in's security self-check on every change.
+# A red X on a commit means the code tried to do something it must never do.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run security self-check
+        run: node security-check.mjs .
