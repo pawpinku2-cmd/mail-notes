@@ -1,0 +1,15 @@
+{
+  "globalHeaders": {
+    "Content-Security-Policy": "default-src 'none'; script-src 'self' https://appsforoffice.microsoft.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://appsforoffice.microsoft.com; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), clipboard-read=()",
+    "Cache-Control": "no-cache"
+  },
+  "mimeTypes": {
+    ".xml": "application/xml",
+    ".mjs": "text/javascript",
+    ".md": "text/markdown"
+  }
+}

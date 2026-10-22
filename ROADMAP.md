@@ -8,8 +8,8 @@ Rule: each phase is tested in real Outlook and signed off before the next phase 
 |---|---|
 | 0 – Private notes MVP | ✅ Done (22 Oct 2026) |
 | 1 – Quick wins | ✅ Tested by owner in Outlook on the web (22 Oct 2026). Narrow-pane layout bug found from the test screenshot and fixed |
-| 2 – Differentiators | 🧪 Built and deployed (v1.2, 22 Oct 2026). Real-Outlook test pending |
-| 3 – Optional / on demand | ⏸ Not started |
+| 2 – Differentiators | 🧪 Deployed (v1.2.2). Dashboard, filter and narrow-pane fix confirmed by owner. Remaining checks pending |
+| 3 – Production readiness | 🛠 Built (22 Oct 2026): security proof, admin pack, hosting prep. GitHub Pages stays live for testing |
 
 ---
 
@@ -52,13 +52,22 @@ Known limits:
 
 Fallback: `manifest-desktop.xml` is the same v1.2 manifest without the mobile section, for use if Outlook rejects `manifest.xml`.
 
-## Phase 3 – Optional / on demand ⏸
+### Added during Phase 2 testing (v1.2.1–1.2.2)
 
-| # | Feature | Notes |
+- **Notes-by-colour chart** in All notes: ring chart with total, counts and % per colour; click a colour to filter. Colours validated for colour-blind readers (light and dark).
+- **Outlook.com fix:** Outlook.com has no pinnable panes (Microsoft limitation), so the pane stays on the email it was opened from. The pane now says which email it's on and to reopen it for another email.
+- **Reliability:** Office calls queued (Outlook allows 3 at once), 15-second timeouts so the pane can't hang, item-change fallback watcher, versioned file URLs (no stale cache), **Diagnostics** panel.
+- Note colour for plain notes changed to **purple** to match the chart.
+
+## Phase 3 – Production readiness 🛠
+
+| # | Item | Status |
 |---|---|---|
-| 3.1 | Production hosting | Azure Static Web Apps (or similar) on a custom domain with security headers. Private repo. |
-| 3.2 | Admin pack | Central deploy via Integrated apps, a script to pre-create colour categories, a usage check |
-| 3.3 | AI note suggestions | Only with Azure OpenAI in the client's own tenant (Australia East). Hold unless clients ask. |
+| 3.0 | **Security proof** (the original goal: must not hijack mail or get flagged by cyber) | ✅ `security-check.mjs`: 58 automated checks (no network, no tokens/EWS/Graph, never reads body/attachments, never sends/forwards/deletes, CSP, least privilege, no executables). Proven by injecting bad code: all caught. Runs on every GitHub push (Actions → Security check). `SECURITY.md` for reviewers. |
+| 3.1 | **Production hosting** | ✅ Prepared, **not switched**. `staticwebapp.config.json` (Azure Static Web Apps, security headers) and steps in ADMIN.md §4. GitHub Pages stays live for testing. |
+| 3.2 | **Admin pack** | ✅ Central deploy steps (Integrated apps), `admin/Set-NoteCategories.ps1` (own mailbox, or many mailboxes app-only, scoped with RBAC for Applications; idempotent, `-WhatIf`), sideloading lock-down, support notes. Mock-tested; needs a real tenant run. |
+| 3.3 | Usage reporting | ❌ Not built on purpose: it would need telemetry (network calls), which breaks the security model. Integrated apps shows deployment status. |
+| 3.4 | AI note suggestions | ⏸ On hold. Only with Azure OpenAI in the client's own tenant (Australia East), and only if clients ask. |
 
 ## Platform limits (won't change)
 
