@@ -10,9 +10,9 @@
   -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://appsforoffice.microsoft.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://appsforoffice.microsoft.com; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>My Mail Notes</title>
-  <link rel="stylesheet" href="taskpane.css?v=1.2.1">
+  <link rel="stylesheet" href="taskpane.css?v=1.2.2">
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <script src="taskpane.js?v=1.2.1" defer></script>
+  <script src="taskpane.js?v=1.2.2" defer></script>
 </head>
 <body>
   <main id="app" aria-busy="true">
@@ -29,6 +29,7 @@
     <div id="view-item" role="tabpanel" aria-labelledby="tab-item">
     <p class="sub" id="context-line">Private note for this email</p>
     <p class="shared-line" id="shared-line" hidden></p>
+    <p class="bound-line" id="bound-line" hidden></p>
 
     <section id="loading" class="loading">
       <span class="spinner" aria-hidden="true"></span>
@@ -129,7 +130,7 @@
     <footer class="foot">
       Private to your mailbox. The note is saved on this item and is never sent to anyone,
       including the sender. Saves automatically as you type.
-      <div class="foot-row"><span>v1.2.1</span><button type="button" id="diag-toggle" class="linkish">Diagnostics</button></div>
+      <div class="foot-row"><span>v1.2.2</span><button type="button" id="diag-toggle" class="linkish">Diagnostics</button></div>
       <div id="diag" class="diag" hidden>
         <pre id="diag-text"></pre>
         <button type="button" id="diag-copy" class="btn small">Copy</button>

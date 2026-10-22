@@ -60,7 +60,7 @@
     view: "item",
   };
 
-  const ADDIN_VERSION = "1.2.1";
+  const ADDIN_VERSION = "1.2.2";
   const env = { mobile: false, canOpen: false, canRemind: false, account: "", itemEvents: "not registered", lastError: null, maxSet: "" };
 
   /* Outlook on the web / new Outlook / mobile allow only 3 async Office calls at once.
@@ -230,6 +230,17 @@
       shared: null,
     };
     setContextLine();
+    // Outlook.com has no pinnable panes: the pane stays on the email it was opened from.
+    const bound = $("bound-line");
+    bound.hidden = env.account !== "outlookCom";
+    if (!bound.hidden) {
+      bound.replaceChildren(
+        document.createTextNode("Outlook.com keeps this pane on the email it was opened from"),
+        document.createTextNode(ctx.subject ? ": " : "."),
+      );
+      if (ctx.subject) { const b = document.createElement("strong"); b.textContent = ctx.subject; bound.append(b, document.createTextNode(".")); }
+      bound.append(document.createTextNode(" To note a different email, close this pane (X) and open My Mail Notes again from that email."));
+    }
     $("note").placeholder = compose
       ? "Type a private note. It stays on your copy after you send or save."
       : "Type a private note for this " + kind + "…";
