@@ -10,9 +10,9 @@
   -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://appsforoffice.microsoft.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://appsforoffice.microsoft.com; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>My Mail Notes</title>
-  <link rel="stylesheet" href="taskpane.css">
+  <link rel="stylesheet" href="taskpane.css?v=1.2.1">
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <script src="taskpane.js" defer></script>
+  <script src="taskpane.js?v=1.2.1" defer></script>
 </head>
 <body>
   <main id="app" aria-busy="true">
@@ -89,6 +89,15 @@
     </div>
 
     <section id="view-all" role="tabpanel" aria-labelledby="tab-all" hidden>
+      <section class="summary" id="summary" aria-label="Notes by colour">
+        <div class="donut-wrap">
+          <svg id="donut" viewBox="0 0 120 120" width="120" height="120" role="img" aria-labelledby="donut-title">
+            <title id="donut-title">Notes by colour</title>
+          </svg>
+          <div id="donut-tip" class="tip" role="tooltip" hidden></div>
+        </div>
+        <ul id="legend" class="legend" aria-label="Notes by colour (click to filter)"></ul>
+      </section>
       <div class="search-row">
         <label for="search" class="visually-hidden">Search notes</label>
         <input id="search" type="search" placeholder="Search notes, subjects, senders…" autocomplete="off">
@@ -120,6 +129,11 @@
     <footer class="foot">
       Private to your mailbox. The note is saved on this item and is never sent to anyone,
       including the sender. Saves automatically as you type.
+      <div class="foot-row"><span>v1.2.1</span><button type="button" id="diag-toggle" class="linkish">Diagnostics</button></div>
+      <div id="diag" class="diag" hidden>
+        <pre id="diag-text"></pre>
+        <button type="button" id="diag-copy" class="btn small">Copy</button>
+      </div>
     </footer>
   </main>
 </body>

@@ -60,7 +60,46 @@
     view: "item",
   };
 
-  const env = { mobile: false, canOpen: false, canRemind: false };
+  const ADDIN_VERSION = "1.2.1";
+  const env = { mobile: false, canOpen: false, canRemind: false, account: "", itemEvents: "not registered", lastError: null, maxSet: "" };
+
+  /* Outlook on the web / new Outlook / mobile allow only 3 async Office calls at once.
+     Queue them (max 2 in flight) and time out calls that never answer, so the pane can't get stuck. */
+  const officeQueue = { running: 0, waiting: [] };
+  const OFFICE_MAX = 2, OFFICE_TIMEOUT_MS = 15000;
+  function callOffice(op, start) {
+    return new Promise(function (resolve) {
+      officeQueue.waiting.push({ op: op, start: start, resolve: resolve });
+      pumpOffice();
+    });
+  }
+  function pumpOffice() {
+    while (officeQueue.running < OFFICE_MAX && officeQueue.waiting.length) {
+      const job = officeQueue.waiting.shift();
+      officeQueue.running++;
+      let done = false;
+      const finish = function (r) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        officeQueue.running--;
+        if (!r || r.status !== Office.AsyncResultStatus.Succeeded) noteError(job.op, r);
+        try { job.resolve(r || { status: Office.AsyncResultStatus.Failed, error: { message: "No response" } }); }
+        finally { setTimeout(pumpOffice, 0); }
+      };
+      const timer = setTimeout(function () {
+        finish({ status: Office.AsyncResultStatus.Failed, error: { name: "Timeout", message: "Outlook didn't respond in time." } });
+      }, OFFICE_TIMEOUT_MS);
+      try { job.start(finish); }
+      catch (e) { finish({ status: Office.AsyncResultStatus.Failed, error: { name: e && e.name || "Error", message: e && e.message || String(e) } }); }
+    }
+  }
+  function noteError(op, r) {
+    if (op === "shared") return;   // "not shared" is the normal answer for most items
+    const err = (r && r.error) || {};
+    env.lastError = { op: op, name: err.name || err.code || "", message: err.message || "", at: new Date().toISOString() };
+    renderDiagnostics();
+  }
 
   const $ = (id) => document.getElementById(id);
 
@@ -75,18 +114,27 @@
       fatal("This version of Outlook is too old for My Mail Notes. Update Outlook or use Outlook on the web.");
       return;
     }
-    detectEnv();
-    buildColourButtons();
-    buildFilter();
-    bindUi();
-    bindDashboard();
-    renderQuickList();
-    renderAll();
-    if (Office.context.requirements.isSetSupported("Mailbox", "1.5")) {
-      Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, onItemChanged);
-    }
-    loadItem();
+    // Each step is isolated: one failure must not stop notes from loading or saving.
+    [detectEnv, buildColourButtons, buildFilter, bindUi, bindDashboard, bindDiagnostics, renderQuickList, renderAll].forEach(safely);
+    safely(function registerItemEvents() {
+      if (!Office.context.requirements.isSetSupported("Mailbox", "1.5")) { env.itemEvents = "not supported"; return; }
+      Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, onItemChanged, function (r) {
+        env.itemEvents = r && r.status === Office.AsyncResultStatus.Succeeded ? "registered"
+          : "failed: " + ((r && r.error && r.error.message) || "unknown");
+        renderDiagnostics();
+      });
+    });
+    safely(loadItem);
+    safely(startItemWatcher);
   });
+
+  function safely(fn) {
+    try { fn(); }
+    catch (e) {
+      env.lastError = { op: "start:" + (fn.name || "step"), name: e && e.name || "", message: e && e.message || String(e), at: new Date().toISOString() };
+      try { renderDiagnostics(); } catch (e2) { /* ignore */ }
+    }
+  }
 
   function detectEnv() {
     const d = Office.context.diagnostics || {};
@@ -95,9 +143,34 @@
     env.canOpen = !env.mobile && typeof mb.displayMessageForm === "function";
     env.canRemind = !env.mobile && typeof mb.displayNewAppointmentForm === "function";
     document.documentElement.classList.toggle("mobile", env.mobile);
+    env.account = (mb.userProfile && mb.userProfile.accountType) || "";
+    const req = Office.context.requirements;
+    for (let v = 16; v >= 1; v--) { if (req.isSetSupported("Mailbox", "1." + v)) { env.maxSet = "1." + v; break; } }
+  }
+
+  /* Fallback for clients that keep the pane open but don't send ItemChanged (seen in Outlook.com):
+     check every second whether Outlook is now pointing at a different item. */
+  let lastSeenItem = null;
+  function currentItemSignature() {
+    const it = Office.context.mailbox.item;
+    if (!it) return "none";
+    return (it.itemId || "") + "|" + (typeof it.subject === "string" ? it.subject : "") + "|" + (it.internetMessageId || "");
+  }
+  function startItemWatcher() {
+    lastSeenItem = currentItemSignature();
+    setInterval(function () {
+      const sig = currentItemSignature();
+      if (sig === lastSeenItem) return;
+      lastSeenItem = sig;
+      if (Office.context.mailbox.item !== state.item || sig === "none") {
+        env.itemEvents = env.itemEvents.indexOf("(watcher used)") === -1 ? env.itemEvents + " (watcher used)" : env.itemEvents;
+        onItemChanged();
+      }
+    }, 1000);
   }
 
   function onItemChanged() {
+    lastSeenItem = currentItemSignature();
     // Flush a pending autosave for the previous item before switching.
     const pending = state.timer !== null;
     clearTimeout(state.timer);
@@ -162,15 +235,15 @@
       : "Type a private note for this " + kind + "…";
     $("remind-btn").hidden = compose || !env.canRemind;
     if (compose && item.subject && typeof item.subject.getAsync === "function") {
-      item.subject.getAsync(function (r) {
+      callOffice("subject", function (cb) { item.subject.getAsync(cb); }).then(function (r) {
         if (seq !== state.seq || r.status !== Office.AsyncResultStatus.Succeeded) return;
         ctx.subject = r.value || "";
         setContextLine();
       });
     }
-    if (typeof item.getSharedPropertiesAsync === "function") {
+    if (typeof item.getSharedPropertiesAsync === "function" && (env.account === "office365" || env.account === "enterprise")) {
       try {
-        item.getSharedPropertiesAsync(function (r) {
+        callOffice("shared", function (cb) { item.getSharedPropertiesAsync(cb); }).then(function (r) {
           if (seq !== state.seq || r.status !== Office.AsyncResultStatus.Succeeded || !r.value) return;
           ctx.shared = String(r.value.owner || "").toLowerCase() || "shared";
           const line = $("shared-line");
@@ -189,7 +262,7 @@
       });
     }
 
-    item.loadCustomPropertiesAsync(function (r) {
+    callOffice("load", function (cb) { item.loadCustomPropertiesAsync(cb); }).then(function (r) {
       if (seq !== state.seq) return;
       setLoading(false);
       if (r.status !== Office.AsyncResultStatus.Succeeded) {
@@ -198,6 +271,7 @@
         return;
       }
       state.props = r.value;
+      renderDiagnostics();
       const data = parse(state.props.get(PROP));
       state.saved = data ? data.text : "";
       state.savedColour = data ? data.colour : "none";
@@ -272,10 +346,15 @@
       state.saving = true;
       setStatus("", "Saving…");
       props.set(PROP, value);
-      props.saveAsync(function (r) {
+      callOffice("save", function (cb) { props.saveAsync(cb); }).then(function (r) {
         state.saving = false;
         if (r.status !== Office.AsyncResultStatus.Succeeded) {
-          if (seq === state.seq) setStatus("error", "Not saved: " + errText(r) + " Try again.");
+          if (seq === state.seq) {
+            setStatus("error", "Not saved: " + errText(r) + " Try again.");
+            if (env.account === "gmail") {
+              showBanner("error", "This looks like a Gmail account added to Outlook. Outlook may not let add-ins store data on Gmail messages. Try a Microsoft 365 or Outlook.com mailbox.");
+            }
+          }
           return resolve();
         }
         if (seq === state.seq) {
@@ -299,7 +378,7 @@
       const ctxSnapshot = state.ctx;
       if (!props) return resolve();
       props.remove(PROP);
-      props.saveAsync(function (r) {
+      callOffice("save", function (cb) { props.saveAsync(cb); }).then(function (r) {
         if (r.status !== Office.AsyncResultStatus.Succeeded) {
           if (seq === state.seq) setStatus("error", "Couldn't delete: " + errText(r));
           return resolve();
@@ -330,19 +409,19 @@
     // They're applied the next time the item is opened in read mode.
     if (!item || !item.categories || isCompose(item)) return;
     const want = colour ? colourById(colour).category : null;
-    item.categories.getAsync(function (r) {
+    callOffice("categories.get", function (cb) { item.categories.getAsync(cb); }).then(function (r) {
       if (r.status !== Office.AsyncResultStatus.Succeeded) return;
       const current = (r.value || []).map(function (c) { return c.displayName; });
       const keepOnly = function (kept) {
         const remove = current.filter(function (n) { return ALL_NOTE_CATEGORIES.indexOf(n) !== -1 && n !== kept; });
-        if (remove.length) item.categories.removeAsync(remove, function () { /* best effort */ });
+        if (remove.length) callOffice("categories.remove", function (cb) { item.categories.removeAsync(remove, cb); });
       };
       const tell = function (text) { if (!silent && seq === state.seq) showBanner("info", text); };
 
       if (!want) { keepOnly(null); return; }
       if (current.indexOf(want) !== -1) { keepOnly(want); return; }
 
-      item.categories.addAsync([want], function (a) {
+      callOffice("categories.add", function (cb) { item.categories.addAsync([want], cb); }).then(function (a) {
         if (a.status === Office.AsyncResultStatus.Succeeded) { keepOnly(want); return; }
         if (want === "Note") {
           tell('Saved. To mark items that have notes, create an Outlook category called "Note" ' +
@@ -354,7 +433,7 @@
         const fallbackMsg = 'Saved. To colour this in your inbox, create an Outlook category called "' +
           c.category + '" (' + c.outlook + ') in Settings > Mail > Categories. For now it\'s tagged "Note".';
         if (current.indexOf("Note") !== -1) { keepOnly("Note"); tell(fallbackMsg); return; }
-        item.categories.addAsync(["Note"], function (b) {
+        callOffice("categories.add", function (cb) { item.categories.addAsync(["Note"], cb); }).then(function (b) {
           if (b.status === Office.AsyncResultStatus.Succeeded) { keepOnly("Note"); tell(fallbackMsg); return; }
           tell('Saved. To mark items that have notes, create Outlook categories called "Note" and "' +
             c.category + '" in Settings > Mail > Categories.');
@@ -452,7 +531,7 @@
       showBanner("error", "Couldn't save the quick-note list: " + e.message);
       return;
     }
-    Office.context.roamingSettings.saveAsync(function (r) {
+    callOffice("settings.save", function (cb) { Office.context.roamingSettings.saveAsync(cb); }).then(function (r) {
       if (r.status !== Office.AsyncResultStatus.Succeeded) {
         showBanner("error", "Couldn't save the quick-note list. " + errText(r));
         return;
@@ -566,7 +645,7 @@
     index.timer = setTimeout(function () {
       try {
         Office.context.roamingSettings.set(IDX_KEY, { v: 1, x: index.evicted, e: index.entries });
-        Office.context.roamingSettings.saveAsync(function (r) {
+        callOffice("settings.save", function (cb) { Office.context.roamingSettings.saveAsync(cb); }).then(function (r) {
           if (r.status !== Office.AsyncResultStatus.Succeeded) {
             showBanner("error", "Couldn't update the All notes list. " + errText(r));
           }
@@ -608,9 +687,9 @@
     if (v === "all") renderAll();
   }
 
-  function filteredEntries() {
+  function filteredEntries(ignoreColour) {
     const terms = $("search").value.toLowerCase().split(/\s+/).filter(Boolean);
-    const colour = $("filter").value;
+    const colour = ignoreColour ? "" : $("filter").value;
     return index.entries.filter(function (e) {
       if (colour && e.c !== colour) return false;
       const hay = (e.s + " " + e.f + " " + e.t + " " + e.o).toLowerCase();
@@ -623,6 +702,7 @@
     if ($("view-all").hidden) return;
     const terms = $("search").value.split(/\s+/).filter(Boolean);
     const list = filteredEntries();
+    renderSummary(filteredEntries(true));
     const ul = $("all-list");
     ul.replaceChildren();
     list.forEach(function (e) {
@@ -671,6 +751,124 @@
     $("all-hint").textContent = hints.join(" ");
     $("export-btn").disabled = list.length === 0;
   }
+
+  /* ------------------------------------------------ summary: donut + legend */
+
+  // Segment order is chosen so neighbouring colours stay distinguishable for colour-blind users.
+  const CHART_ORDER = ["urgent", "info", "followup", "none", "done"];
+  const SVGNS = "http://www.w3.org/2000/svg";
+
+  function setFilter(id) {
+    const sel = $("filter");
+    sel.value = sel.value === id ? "" : id;
+    renderAll();
+  }
+
+  function renderSummary(entries) {
+    const box = $("summary");
+    box.hidden = index.entries.length === 0;
+    if (box.hidden) return;
+    const counts = {};
+    CHART_ORDER.forEach(function (id) { counts[id] = 0; });
+    entries.forEach(function (e) { counts[e.c in counts ? e.c : "none"]++; });
+    const total = entries.length;
+    const active = $("filter").value;
+
+    // Legend (doubles as the data table: label, count, share)
+    const legend = $("legend");
+    legend.replaceChildren();
+    CHART_ORDER.forEach(function (id) {
+      const c = colourById(id);
+      const n = counts[id];
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.c = id;
+      b.setAttribute("aria-pressed", String(active === id));
+      b.disabled = n === 0 && active !== id;
+      b.title = n ? "Show only " + c.label + " notes" : "No " + c.label + " notes";
+      const sw = document.createElement("span");
+      sw.className = "sw";
+      sw.style.background = "var(--c-" + id + ")";
+      const name = document.createElement("span");
+      name.textContent = id === "none" ? "No colour" : c.label;
+      const num = document.createElement("span");
+      num.className = "n";
+      num.textContent = String(n);
+      const pct = document.createElement("span");
+      pct.className = "pct";
+      pct.textContent = total ? Math.round(n / total * 100) + "%" : "–";
+      b.append(sw, name, num, pct);
+      b.addEventListener("click", function () { setFilter(id); });
+      li.append(b);
+      legend.append(li);
+    });
+
+    // Donut
+    const svg = $("donut");
+    Array.from(svg.querySelectorAll(":scope > :not(title)")).forEach(function (n) { n.remove(); });
+    svg.classList.toggle("has-focus", !!active);
+    const cx = 60, cy = 60, R = 56, r = 38;
+    if (!total) {
+      const ring = document.createElementNS(SVGNS, "circle");
+      ring.setAttribute("cx", cx); ring.setAttribute("cy", cy); ring.setAttribute("r", (R + r) / 2);
+      ring.setAttribute("fill", "none"); ring.setAttribute("stroke", "var(--line)"); ring.setAttribute("stroke-width", R - r);
+      svg.append(ring);
+    }
+    let a0 = -Math.PI / 2;
+    CHART_ORDER.forEach(function (id) {
+      const n = counts[id];
+      if (!n) return;
+      const sweep = n / total * Math.PI * 2;
+      const path = document.createElementNS(SVGNS, "path");
+      path.setAttribute("d", arcPath(cx, cy, R, r, a0, a0 + sweep));
+      path.setAttribute("class", "seg" + (active === id ? " on" : ""));
+      path.setAttribute("fill", "var(--c-" + id + ")");
+      path.setAttribute("stroke", "var(--card)");     // 2px surface gap between segments
+      path.setAttribute("stroke-width", "2");
+      path.setAttribute("stroke-linejoin", "round");
+      path.dataset.c = id;
+      const label = (id === "none" ? "No colour" : colourById(id).label) + " · " + n + " note" + (n === 1 ? "" : "s") +
+        " (" + Math.round(n / total * 100) + "%)";
+      path.addEventListener("mousemove", function (ev) { showTip(ev, label); });
+      path.addEventListener("mouseleave", hideTip);
+      path.addEventListener("click", function () { hideTip(); setFilter(id); });
+      svg.append(path);
+      a0 += sweep;
+    });
+    const t1 = document.createElementNS(SVGNS, "text");
+    t1.setAttribute("x", cx); t1.setAttribute("y", cy + 3); t1.setAttribute("text-anchor", "middle");
+    t1.setAttribute("class", "total");
+    t1.textContent = String(total);
+    const t2 = document.createElementNS(SVGNS, "text");
+    t2.setAttribute("x", cx); t2.setAttribute("y", cy + 17); t2.setAttribute("text-anchor", "middle");
+    t2.setAttribute("class", "total-sub");
+    t2.textContent = total === 1 ? "note" : "notes";
+    svg.append(t1, t2);
+    $("donut-title").textContent = "Notes by colour: " + CHART_ORDER.filter(function (id) { return counts[id]; })
+      .map(function (id) { return (id === "none" ? "No colour" : colourById(id).label) + " " + counts[id]; }).join(", ");
+  }
+
+  function arcPath(cx, cy, R, r, a0, a1) {
+    if (a1 - a0 >= Math.PI * 2 - 1e-6) {          // full ring: draw as two halves
+      const m = a0 + Math.PI;
+      return arcPath(cx, cy, R, r, a0, m) + " " + arcPath(cx, cy, R, r, m, a1);
+    }
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+    const p = function (rad, a) { return (cx + rad * Math.cos(a)).toFixed(2) + " " + (cy + rad * Math.sin(a)).toFixed(2); };
+    return "M " + p(R, a0) + " A " + R + " " + R + " 0 " + large + " 1 " + p(R, a1) +
+      " L " + p(r, a1) + " A " + r + " " + r + " 0 " + large + " 0 " + p(r, a0) + " Z";
+  }
+
+  function showTip(ev, text) {
+    const tip = $("donut-tip");
+    const box = $("donut").getBoundingClientRect();
+    tip.textContent = text;
+    tip.style.left = "60px";   // centred over the donut so it never runs off a narrow pane
+    tip.style.top = (ev.clientY - box.top) + "px";
+    tip.hidden = false;
+  }
+  function hideTip() { $("donut-tip").hidden = true; }
 
   function badge(text) {
     const b = document.createElement("span");
@@ -762,6 +960,54 @@
     } catch (e) {
       showBanner("info", "Download isn't allowed here. Use Copy instead.");
     }
+  }
+
+  /* ------------------------------------------------------------ diagnostics */
+
+  function diagnosticsText() {
+    const d = Office.context.diagnostics || {};
+    const it = state.item;
+    const lines = [
+      "My Mail Notes " + ADDIN_VERSION,
+      "Outlook: " + (d.hostName || "?") + " " + (d.hostVersion || "") + " on " + (d.platform || "?"),
+      "Account type: " + (env.account || "unknown"),
+      "Highest Mailbox API set: " + (env.maxSet || "?"),
+      "Item change events: " + env.itemEvents,
+      "Current item: " + (it ? (it.itemType || "?") + (state.ctx && state.ctx.compose ? " (draft)" : "") : "none"),
+      "Note loaded: " + (state.props ? "yes" : "no") + ", saved text: " + (state.saved ? state.saved.length + " chars" : "none"),
+      "Categories API: " + (it && it.categories ? "available" : "not available"),
+      "All notes list: " + index.entries.length + " entries",
+      "Last error: " + (env.lastError ? env.lastError.op + " – " + [env.lastError.name, env.lastError.message].filter(Boolean).join(": ") + " (" + env.lastError.at + ")" : "none"),
+    ];
+    return lines.join("\n");
+  }
+
+  function renderDiagnostics() {
+    const box = $("diag-text");
+    if (box && !$("diag").hidden) box.textContent = diagnosticsText();
+  }
+
+  function bindDiagnostics() {
+    $("diag-toggle").addEventListener("click", function () {
+      const d = $("diag");
+      d.hidden = !d.hidden;
+      renderDiagnostics();
+    });
+    $("diag-copy").addEventListener("click", function () {
+      const t = diagnosticsText();
+      const ok = function () { showBanner("ok", "Diagnostics copied.", 2000); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(ok, function () { selectText($("diag-text")); });
+      else selectText($("diag-text"));
+    });
+  }
+
+  function selectText(el) {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    showBanner("info", "Press Ctrl+C (Cmd+C on Mac) to copy.");
   }
 
   /* ------------------------------------------------------------------ UI */
