@@ -1,5 +1,7 @@
 # My Mail Notes
 
+Created by Vaibhav Girdhar.
+
 Private notes on your Outlook emails and meetings: colour tags, quick notes, reminders, an All notes dashboard with search and a by-colour chart, and CSV export.
 
 - Notes are stored **on the email, in your own mailbox**. Never sent to anyone, never sent to a server.

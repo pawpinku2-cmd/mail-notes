@@ -1,5 +1,7 @@
 # My Mail Notes – admin guide (Phase 3)
 
+Created by Vaibhav Girdhar.
+
 For IT admins rolling the add-in out to an organisation. The GitHub Pages version stays live for testing. Nothing here changes it until you choose to switch.
 
 | Step | What | When |
@@ -84,10 +86,10 @@ GitHub Pages under a personal account is fine for testing, not for clients: whoe
    ```powershell
    npx @azure/static-web-apps-cli deploy . --deployment-token <token-from-portal> --env production
    ```
-3. Optional: add a custom domain, e.g. `notes.onovoit.com.au`.
+3. Optional: add a custom domain, e.g. `mailnotes.yourdomain.com.au`.
 4. Point the manifest at the new address:
    ```powershell
-   (Get-Content .\manifest.xml -Raw).Replace('https://pawpinku2-cmd.github.io/mail-notes', 'https://notes.onovoit.com.au') |
+   (Get-Content .\manifest.xml -Raw).Replace('https://pawpinku2-cmd.github.io/mail-notes', 'https://mailnotes.yourdomain.com.au') |
        Set-Content .\manifest.xml -Encoding utf8
    ```
 5. **Raise the version** in `manifest.xml` (e.g. `1.2.0.0` → `1.3.0.0`), run `node security-check.mjs`, then upload the manifest in Integrated apps (step 2).

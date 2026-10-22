@@ -10,11 +10,11 @@
            xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
            xsi:type="MailApp">
   <Id>3e50212e-1253-46ed-a84c-7bbfd1341cf8</Id>
-  <Version>1.2.0.0</Version>
-  <ProviderName>Onovo IT</ProviderName>
+  <Version>1.2.1.0</Version>
+  <ProviderName>Vaibhav Girdhar</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="My Mail Notes"/>
-  <Description DefaultValue="Add private notes to emails and meetings. Notes are stored on the item in your own mailbox and are never sent to anyone. Items with notes are tagged with a colour category."/>
+  <Description DefaultValue="Add private notes to emails and meetings. Notes are stored on the item in your own mailbox and are never sent to anyone. Items with notes are tagged with a colour category. Created by Vaibhav Girdhar."/>
   <IconUrl DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-64.png"/>
   <HighResolutionIconUrl DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/assets/icon-128.png"/>
   <SupportUrl DefaultValue="https://pawpinku2-cmd.github.io/mail-notes/"/>

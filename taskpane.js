@@ -1,4 +1,5 @@
 /* My Mail Notes – private notes on emails and meetings (Outlook add-in).
+ * Created by Vaibhav Girdhar.
  *
  * How it works:
  *  - The note is saved as a custom property on the item, in your own mailbox
@@ -60,7 +61,7 @@
     view: "item",
   };
 
-  const ADDIN_VERSION = "1.2.2";
+  const ADDIN_VERSION = "1.2.3";
   const env = { mobile: false, canOpen: false, canRemind: false, account: "", itemEvents: "not registered", lastError: null, maxSet: "" };
 
   /* Outlook on the web / new Outlook / mobile allow only 3 async Office calls at once.

@@ -1,6 +1,6 @@
 # My Mail Notes – security summary
 
-For IT and cyber security reviewers. Version 1.2.2.
+For IT and cyber security reviewers. Version 1.2.3. Created by Vaibhav Girdhar.
 
 **In one line:** an Outlook add-in that stores a private note on the email you have open. It has no server, makes no network calls of its own, asks for the lowest permission that can write to an email, and can't read, send, forward or delete mail.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// My Mail Notes – security self-check.
+// My Mail Notes – security self-check. Created by Vaibhav Girdhar.
 // Proves, from the source itself, what the add-in can and cannot do. No dependencies.
 // Run:  node security-check.mjs [folder]      (default: this script's folder)
 // Exit code 0 = all checks passed. Runs automatically on every push (GitHub Actions).
@@ -82,7 +82,7 @@ manifests.forEach((m) => {
   check(/<Permissions>ReadWriteItem<\/Permissions>/.test(x) && !/ReadWriteMailbox/.test(x), `${m}: permission is ReadWriteItem (open item only), not ReadWriteMailbox`);
   check(!/<AppDomains>/.test(x), `${m}: no extra AppDomains`);
   check(!/WebApplicationInfo|<Scopes>|ExtendedPermissions|EventBasedActivation|LaunchEvent/.test(x), `${m}: no sign-in, no background/on-send events`);
-  const hosts = new Set([...x.matchAll(/https:\/\/([^/"]+)/g)].map((h) => h[1]).filter((h) => !/schemas\.microsoft\.com|w3\.org/.test(h)));
+  const hosts = new Set([...x.matchAll(/https:\/\/([^/"\s<>]+)/g)].map((h) => h[1]).filter((h) => !/schemas\.microsoft\.com|w3\.org/.test(h)));
   check(hosts.size === 1, `${m}: every URL points to one host`, [...hosts].join(", "));
 });
 
